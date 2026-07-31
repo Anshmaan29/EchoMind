@@ -43,3 +43,4 @@ exclude = ["tests/"]
 minversion = "8.0"
 addopts = "-ra -q --asyncio-mode=auto"
 testpaths = ["tests"]
+pythonpath = [".", ".."]

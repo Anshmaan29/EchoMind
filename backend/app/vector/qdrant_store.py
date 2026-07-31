@@ -15,40 +15,64 @@ from app.vector.base import BaseVectorStore, VectorRecord, VectorSearchResult
 class QdrantVectorStore(BaseVectorStore):
     """
     Qdrant Vector Store Implementation supporting REST and gRPC operations.
+    Features single-warning connection tracking for clean local development without Qdrant.
     """
     def __init__(self, host: str = None, port: int = None, api_key: str = None) -> None:
         self.host = host or settings.QDRANT_HOST
         self.port = port or settings.QDRANT_PORT
         self.api_key = api_key or settings.QDRANT_API_KEY
-        
-        try:
-            self.client = AsyncQdrantClient(
+        self.is_available: bool | None = None
+        self._client: AsyncQdrantClient | None = None
+
+    def _get_client(self) -> AsyncQdrantClient:
+        if self._client is None:
+            self._client = AsyncQdrantClient(
                 host=self.host,
                 port=self.port,
                 api_key=self.api_key,
-                timeout=10.0
+                timeout=2.0
             )
-        except Exception as e:
-            logger.warning(f"Could not connect to external Qdrant ({e}). Initializing in-memory Qdrant client.")
-            self.client = AsyncQdrantClient(":memory:")
+        return self._client
+
+    async def _check_availability(self) -> bool:
+        if self.is_available is not None:
+            return self.is_available
+
+        try:
+            client = self._get_client()
+            await client.get_collections()
+            self.is_available = True
+            return True
+        except Exception:
+            self.is_available = False
+            logger.warning("Qdrant unavailable. Using local JSONL backup.")
+            return False
 
     async def initialize_collection(self, collection_name: str, dimension: int) -> None:
+        if not await self._check_availability():
+            return
+
         try:
-            collections = await self.client.get_collections()
+            client = self._get_client()
+            collections = await client.get_collections()
             existing_names = [c.name for c in collections.collections]
             
             if collection_name not in existing_names:
-                await self.client.create_collection(
+                await client.create_collection(
                     collection_name=collection_name,
                     vectors_config=VectorParams(size=dimension, distance=Distance.COSINE)
                 )
                 logger.info(f"Created Qdrant collection '{collection_name}' with dimension {dimension}.")
         except Exception as e:
-            logger.warning(f"Failed to check/create Qdrant collection: {e}")
+            self.is_available = False
+            logger.warning("Qdrant unavailable. Using local JSONL backup.")
 
     async def upsert_records(self, collection_name: str, records: list[VectorRecord]) -> bool:
         if not records:
             return True
+
+        if not await self._check_availability():
+            return False
 
         points = [
             PointStruct(
@@ -60,11 +84,12 @@ class QdrantVectorStore(BaseVectorStore):
         ]
 
         try:
-            await self.client.upsert(collection_name=collection_name, points=points)
-            logger.info(f"Upserted {len(records)} points into Qdrant collection '{collection_name}'.")
+            client = self._get_client()
+            await client.upsert(collection_name=collection_name, points=points)
             return True
-        except Exception as e:
-            logger.error(f"Error upserting vectors into Qdrant: {e}")
+        except Exception:
+            self.is_available = False
+            logger.warning("Qdrant unavailable. Using local JSONL backup.")
             return False
 
     async def search(
@@ -74,16 +99,20 @@ class QdrantVectorStore(BaseVectorStore):
         limit: int = 5,
         score_threshold: float = 0.0
     ) -> list[VectorSearchResult]:
+        if not await self._check_availability():
+            return []
+
         try:
-            if hasattr(self.client, "search"):
-                hits = await self.client.search(
+            client = self._get_client()
+            if hasattr(client, "search"):
+                hits = await client.search(
                     collection_name=collection_name,
                     query_vector=query_vector,
                     limit=limit,
                     score_threshold=score_threshold
                 )
-            elif hasattr(self.client, "query_points"):
-                res = await self.client.query_points(
+            elif hasattr(client, "query_points"):
+                res = await client.query_points(
                     collection_name=collection_name,
                     query=query_vector,
                     limit=limit,
@@ -101,13 +130,18 @@ class QdrantVectorStore(BaseVectorStore):
                 )
                 for hit in hits
             ]
-        except Exception as e:
-            logger.error(f"Qdrant search error: {e}")
+        except Exception:
+            self.is_available = False
+            logger.warning("Qdrant unavailable. Using local JSONL backup.")
             return []
 
     async def delete_by_document_id(self, collection_name: str, document_id: str) -> bool:
+        if not await self._check_availability():
+            return False
+
         try:
-            await self.client.delete(
+            client = self._get_client()
+            await client.delete(
                 collection_name=collection_name,
                 points_selector=Filter(
                     must=[
@@ -118,8 +152,7 @@ class QdrantVectorStore(BaseVectorStore):
                     ]
                 )
             )
-            logger.info(f"Deleted vector points for document_id '{document_id}'.")
             return True
-        except Exception as e:
-            logger.error(f"Qdrant point deletion error: {e}")
+        except Exception:
+            self.is_available = False
             return False

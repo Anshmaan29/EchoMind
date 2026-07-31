@@ -42,11 +42,16 @@ class Settings(BaseSettings):
     NEO4J_DATABASE: str = "neo4j"
     GRAPH_STORE_TYPE: Literal["neo4j", "mock"] = "neo4j"
 
-    # Embedding Provider Configuration (Default: mock hash provider for keyless/zero-download local execution)
+    # Embedding Provider Configuration
     EMBEDDING_PROVIDER: Literal["mock", "openai", "sentence_transformers", "bge-m3", "qwen", "qwen3", "nomic"] = "mock"
     EMBEDDING_MODEL_NAME: str = "Qwen/Qwen3-Embedding-8B"
     EMBEDDING_DIMENSION: int = 384
     OPENAI_API_KEY: str | None = None
+
+    # LLM Provider Configuration (RAG Pipeline)
+    LLM_PROVIDER: Literal["mock", "openai", "anthropic", "openrouter"] = "mock"
+    LLM_MODEL_NAME: str = "mock-gpt-4o"
+    LLM_API_KEY: str | None = None
 
     @property
     def async_database_url(self) -> str:

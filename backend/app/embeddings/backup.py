@@ -10,7 +10,9 @@ class JSONLBackupWriter:
     """
     def __init__(self, backup_filepath: str = "data/embeddings_backup.jsonl") -> None:
         self.backup_filepath = backup_filepath
-        os.makedirs(os.path.dirname(self.backup_filepath), exist_ok=True)
+        dir_name = os.path.dirname(self.backup_filepath)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
 
     def write_records(
         self,
@@ -39,7 +41,7 @@ class JSONLBackupWriter:
                     })
                     f.write(line + "\n")
                     count += 1
-            logger.info(f"Appended {count} embedding records to local backup '{self.backup_filepath}'.")
+            logger.debug(f"Appended {count} embedding records to local backup '{self.backup_filepath}'.")
         except Exception as e:
             logger.error(f"Error writing to JSONL backup file '{self.backup_filepath}': {e}")
 

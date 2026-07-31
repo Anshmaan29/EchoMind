@@ -9,6 +9,8 @@ from app.embeddings.base import BaseEmbeddingProvider
 class QwenEmbeddingProvider(BaseEmbeddingProvider):
     """
     Production Embedding Provider using Qwen/Qwen3-Embedding-8B via PyTorch & Transformers.
+    Intended for AI Kosh GPU environments.
+    
     Features:
     - Automatic CUDA / MPS / CPU hardware detection
     - bfloat16 mixed precision inference optimized for NVIDIA A100 GPUs
@@ -49,7 +51,7 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
                 else:
                     self.torch_dtype = torch.float16
                 logger.info(
-                    f"QwenEmbeddingProvider using CUDA GPU: '{self.gpu_device_name}' with bfloat16 precision {self.torch_dtype}."
+                    f"QwenEmbeddingProvider using CUDA GPU: '{self.gpu_device_name}' with precision {self.torch_dtype}."
                 )
             elif torch.backends.mps.is_available():
                 self.device = "mps"
@@ -77,7 +79,9 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
         except Exception as e:
             logger.error(f"CRITICAL: Failed to load Qwen embedding model '{self.model_name}': {e}")
             self._is_initialized = False
-            raise EchoMindException(f"Failed to initialize QwenEmbeddingProvider with model '{self.model_name}': {e}") from e
+            raise EchoMindException(
+                f"Failed to initialize QwenEmbeddingProvider with model '{self.model_name}': {e}"
+            ) from e
 
     @property
     def dimension(self) -> int:

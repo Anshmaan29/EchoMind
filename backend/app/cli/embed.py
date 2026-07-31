@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 from app.core.config import settings
 from app.core.logging import logger, setup_logging
+from app.embeddings.factory import EmbeddingFactory
 from app.embeddings.pipeline import EmbeddingItem, GenericEmbeddingPipeline, SourceType
 
 SUPPORTED_EXTENSIONS = {
@@ -33,7 +34,42 @@ IGNORED_DIRS = {
     "logs",
     ".idea",
     ".vscode",
+    ".pytest_cache",
+    ".mypy_cache",
+    "data",
+    "dist",
+    "build",
+    ".eggs",
+    "*.egg-info",
 }
+
+def extract_code_symbols(filepath: str, content: str) -> dict[str, Any]:
+    """Extracts class names, function names, and imported symbols from Python source files."""
+    import re
+    symbols: dict[str, Any] = {
+        "class_names": [],
+        "function_names": [],
+        "imported_symbols": [],
+        "defined_symbols": [],
+    }
+    if not filepath.endswith(".py"):
+        return symbols
+
+    # Class definitions
+    symbols["class_names"] = re.findall(r"^class\s+([A-Za-z_][A-Za-z0-9_]*)", content, re.MULTILINE)
+    # Function definitions
+    symbols["function_names"] = re.findall(r"^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)", content, re.MULTILINE)
+    # Import statements
+    imports = re.findall(r"^(?:from\s+\S+\s+import|import)\s+(.+)", content, re.MULTILINE)
+    for imp in imports:
+        for sym in re.split(r"[,\s]+", imp):
+            sym = sym.strip().split(" as ")[0].strip()
+            if sym:
+                symbols["imported_symbols"].append(sym)
+    # All class + function names together
+    symbols["defined_symbols"] = symbols["class_names"] + symbols["function_names"]
+    return symbols
+
 
 def chunk_file_lines(
     filepath: str,
@@ -58,7 +94,6 @@ def chunk_file_lines(
     start_line = 1
 
     for line_idx, line in enumerate(lines, start=1):
-        # Empty double newline split or character/line limit threshold
         if (
             len(current_lines) >= max_lines_per_chunk
             or (current_char_count + len(line) > max_chars_per_chunk and current_lines)
@@ -103,7 +138,6 @@ def scan_input_path(input_path: str) -> list[EmbeddingItem]:
         files_to_process.append(abs_input_path)
     else:
         for root, dirs, files in os.walk(abs_input_path):
-            # Prune ignored directory subtrees
             dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
             for file in files:
                 ext = os.path.splitext(file)[1].lower()
@@ -115,9 +149,20 @@ def scan_input_path(input_path: str) -> list[EmbeddingItem]:
         filename = os.path.basename(filepath)
         source_type: SourceType = SUPPORTED_EXTENSIONS.get(ext, "github" if ext in [".py", ".ts", ".tsx", ".js", ".jsx"] else "pdf")
 
+        # Read full file content for symbol extraction
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as _f:
+                full_content = _f.read()
+        except Exception:
+            full_content = ""
+
+        file_symbols = extract_code_symbols(filepath, full_content)
+
         chunk_blocks = chunk_file_lines(filepath)
         for c in chunk_blocks:
             item_id = f"{filename}_L{c['start_line']}_L{c['end_line']}_{uuid.uuid4().hex[:6]}"
+            # Extract chunk-level symbols too
+            chunk_symbols = extract_code_symbols(filepath, c["content"])
             items.append(
                 EmbeddingItem(
                     id=item_id,
@@ -128,7 +173,13 @@ def scan_input_path(input_path: str) -> list[EmbeddingItem]:
                         "filename": filename,
                         "extension": ext or "none",
                         "start_line": c["start_line"],
-                        "end_line": c["end_line"]
+                        "end_line": c["end_line"],
+                        "class_names": chunk_symbols["class_names"],
+                        "function_names": chunk_symbols["function_names"],
+                        "file_class_names": file_symbols["class_names"],
+                        "file_function_names": file_symbols["function_names"],
+                        "defined_symbols": chunk_symbols["defined_symbols"],
+                        "imported_symbols": chunk_symbols["imported_symbols"],
                     }
                 )
             )
@@ -140,12 +191,15 @@ async def main_async(args: argparse.Namespace) -> None:
     setup_logging()
     logger.info(f"Starting EchoMind Codebase Embedding CLI on path '{args.input}'...")
 
+    provider_name = args.provider or settings.EMBEDDING_PROVIDER
+    provider = EmbeddingFactory.get_provider(provider_name=provider_name)
+
     items = scan_input_path(args.input)
     if not items:
         logger.warning(f"No valid source files found under '{args.input}'. Exiting CLI.")
         return
 
-    pipeline = GenericEmbeddingPipeline()
+    pipeline = GenericEmbeddingPipeline(embedder=provider)
     metrics = await pipeline.process_items(
         items=items,
         collection_name=args.collection_name,
@@ -154,17 +208,18 @@ async def main_async(args: argparse.Namespace) -> None:
         resume=not args.no_resume
     )
 
+    device_info = getattr(provider, "device", "cpu").upper()
+    model_name = getattr(provider, "model_name", "hash_mock")
+
     print("\n" + "=" * 65)
-    print("🚀 ECHOMIND RECURSIVE CODEBASE EMBEDDING SUMMARY")
+    print("🚀 ECHOMIND EMBEDDING CLI SUMMARY")
     print("=" * 65)
-    print(f"Scanned Input Path   : {args.input}")
-    print(f"Total Chunks Scanned  : {metrics.total_items}")
-    print(f"Items Processed       : {metrics.processed_items}")
-    print(f"Items Skipped (Check) : {metrics.skipped_items}")
-    print(f"Items Failed          : {metrics.failed_items}")
-    print(f"Elapsed Seconds       : {metrics.elapsed_seconds} s")
-    print(f"Embeddings Throughput : {metrics.embeddings_per_sec} vec/sec")
-    print(f"Documents Throughput  : {metrics.documents_per_sec} doc/sec")
+    print(f"Embedding Provider   : {provider_name.upper()}")
+    print(f"Embedding Model      : {model_name}")
+    print(f"Device               : {device_info}")
+    print(f"Embedding Dimension  : {provider.dimension}")
+    print(f"Chunks Processed     : {metrics.processed_items}")
+    print(f"Embeddings/sec       : {metrics.embeddings_per_sec}")
     print("=" * 65 + "\n")
 
 def main() -> None:
@@ -177,10 +232,15 @@ def main() -> None:
         help="Path to input file or directory to scan recursively (default: ..)"
     )
     parser.add_argument(
+        "--provider", "-p",
+        default=None,
+        help="Embedding provider override (mock, qwen, openai, bge)"
+    )
+    parser.add_argument(
         "--batch-size", "-b",
         type=int,
         default=64,
-        help="Batch size for GPU acceleration (default: 64)"
+        help="Batch size for acceleration (default: 64)"
     )
     parser.add_argument(
         "--workers", "-w",

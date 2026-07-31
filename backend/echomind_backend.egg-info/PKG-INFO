@@ -1,4 +1,22 @@
-# EchoMind Backend - RAG Question Answering & AI Memory Operating System
+Metadata-Version: 2.4
+Name: echomind-backend
+Version: 0.1.0
+Summary: EchoMind - AI-powered Digital Memory Operating System Backend
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn[standard]>=0.28.0
+Requires-Dist: pydantic>=2.6.0
+Requires-Dist: pydantic-settings>=2.2.0
+Requires-Dist: sqlalchemy[asyncio]>=2.0.28
+Requires-Dist: asyncpg>=0.29.0
+Requires-Dist: qdrant-client>=1.8.0
+Requires-Dist: pypdf>=4.1.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: structlog>=24.1.0
+
+# EchoMind Backend - Hybrid Vector Search & AI Operating System
 
 EchoMind is an AI-powered Digital Memory Operating System. Instead of simply chatting over static documents, it reconstructs a user's digital history (PDFs, GitHub repositories, WhatsApp exports, Audio recordings, Notes) into an intelligent, queryable **Temporal Memory Graph**.
 
@@ -18,7 +36,8 @@ EchoMind is an AI-powered Digital Memory Operating System. Instead of simply cha
                   ┌──────────────────────────────────────────────┐
                   │              Services Layer                  │
                   │ IngestionService | DocumentService           │
-                  │ SearchService    | AskService (RAG Engine)   │
+                  │ KnowledgeService | TimelineService           │
+                  │ SearchService (Hybrid Vector & JSONL Backup) │
                   └──────────────────────┬───────────────────────┘
                                          │
         ┌────────────────────────────────┼────────────────────────────────┐
@@ -33,8 +52,8 @@ EchoMind is an AI-powered Digital Memory Operating System. Instead of simply cha
         │                               │                                │
         ▼                               ▼                                ▼
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│               CLI Conversational RAG & Experiments Harness                      │
-│   app.cli.embed (Code Indexing) | app.cli.search | app.cli.ask (RAG Engine)   │
+│                   CLI Tools & AI Kosh GPU Experiments Harness                   │
+│   app.cli.embed (Recursive Scan)  |  app.cli.search (Vector & Backup Search)   │
 └───────┬───────────────────────────────┬────────────────────────────────┬───────┘
         │                               │                                │
         ▼                               ▼                                ▼
@@ -47,30 +66,29 @@ EchoMind is an AI-powered Digital Memory Operating System. Instead of simply cha
 
 ---
 
-## 💬 EchoMind Ask CLI (Retrieval-Augmented Generation / RAG)
+## 🔍 Hybrid Vector Search Service & CLI
 
-Ask questions over your indexed codebase and digital history:
+The **Hybrid Search Service** (`app/services/search_service.py`) provides provider-agnostic cosine similarity search over code and document chunks. It queries Qdrant when online, and automatically falls back to local JSONL vector backup files (`embeddings_backup.jsonl`).
+
+### CLI Search Usage
+
+Search your indexed repository directly from the command line:
 
 ```bash
-python -m app.cli.ask --query "Where is QwenEmbeddingProvider implemented?"
+python -m app.cli.search --query "How does the embedding pipeline work?" --top-k 5
 ```
 
 CLI Parameters:
-- `--query` / `-q`: Natural language user question (required)
-- `--top-k` / `-k`: Number of context chunks to retrieve (default: `5`)
-- `--llm-provider` / `-l`: LLM provider choice (default: `mock`)
-
----
-
-## 🔍 Vector Search CLI
-
-```bash
-python -m app.cli.search --query "How does embedding pipeline work?" --top-k 5
-```
+- `--query` / `-q`: Natural language search query string (required)
+- `--top-k` / `-k`: Number of top matching chunks to return (default: `5`)
+- `--backup-path` / `-f`: Path to custom JSONL backup file
+- `--min-score` / `-s`: Minimum cosine similarity score threshold (default: `0.0`)
 
 ---
 
 ## 🚀 Recursive Codebase Ingestion CLI
+
+Recursively scan and chunk all supported source files (`.py`, `.md`, `.json`, `.yaml`, `.yml`, `.toml`, `.tsx`, `.ts`, `.js`, `.jsx`):
 
 ```bash
 python -m app.cli.embed --input ..

@@ -1,3 +1,11 @@
+import os
+import sys
+
+# Ensure backend root directory is at the front of sys.path for pytest
+backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 import asyncio
 from collections.abc import AsyncGenerator, Generator
 import pytest
