@@ -1,0 +1,24 @@
+# EchoMind AI Kosh GPU Experiments Configuration
+
+experiment:
+  name: "ai_kosh_gpu_job"
+  device: "auto" # "auto", "cuda", "mps", "cpu"
+  precision: "float16" # "float16", "bfloat16", "float32"
+  batch_size: 64
+  max_workers: 4
+  max_retries: 3
+  resume: true
+
+paths:
+  input_data: "./data"
+  checkpoint_dir: "./experiments/outputs/checkpoints"
+  output_dir: "./experiments/outputs"
+  log_dir: "./experiments/logs"
+
+model:
+  name: "BAAI/bge-m3"
+  dimension: 1024
+
+vector_store:
+  collection_name: "echomind_experiments"
+  similarity_threshold: 0.65

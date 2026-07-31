@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+backend/.venv/
+
+# Environment variables
+.env
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# Checkpoints
+.checkpoints/
+
+# AI artifacts
+data/
+backend/data/
+experiments/outputs/
+
+# Archives
+*.zip
+
+# Jupyter
+.ipynb_checkpoints/
