@@ -7,7 +7,7 @@ from app.core.logging import logger
 from app.embeddings.backup import JSONLBackupWriter
 from app.embeddings.base import BaseEmbeddingProvider
 from app.embeddings.checkpoint import CheckpointManager
-from app.embeddings.factory import embedding_provider
+from app.embeddings.factory import get_embedding_provider
 from app.vector.base import BaseVectorStore, VectorRecord
 from app.vector.factory import vector_store
 
@@ -24,19 +24,25 @@ class EmbeddingItem(BaseModel):
     content: str = Field(..., min_length=1)
     meta_data: dict[str, Any] = Field(default_factory=dict)
 
+
 class PipelineMetrics(BaseModel):
-    total_items: int = 0
-    processed_items: int = 0
-    skipped_items: int = 0
-    failed_items: int = 0
-    elapsed_seconds: float = 0.0
-    embeddings_per_sec: float = 0.0
-    documents_per_sec: float = 0.0
+    """
+    Execution summary telemetry metrics returned by GenericEmbeddingPipeline.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    total_items: int
+    processed_items: int
+    skipped_items: int
+    failed_items: int
+    elapsed_seconds: float
+    embeddings_per_sec: float
+    documents_per_sec: float
+
 
 class GenericEmbeddingPipeline:
     """
-    Production-Grade Batching & Async Embedding Generation Pipeline.
-    Supports PDF chunks, Image OCR/captions, GitHub files, Timeline events, and Knowledge Graph entities.
+    Generic Production Ingestion & Vector Embedding Pipeline.
     Optimized for high GPU throughput (A100), automated failure resumption, Qdrant indexing, and local JSONL backups.
     """
     def __init__(
@@ -46,7 +52,7 @@ class GenericEmbeddingPipeline:
         checkpoint_db_path: str = ".checkpoints/embedding_checkpoint.db",
         backup_filepath: str = "data/embeddings_backup.jsonl"
     ) -> None:
-        self.embedder = embedder or embedding_provider
+        self.embedder = embedder if embedder is not None else get_embedding_provider()
         self.vector_store = vector_store_inst or vector_store
         self.checkpoint = CheckpointManager(db_path=checkpoint_db_path)
         self.backup_writer = JSONLBackupWriter(backup_filepath=backup_filepath)
@@ -55,13 +61,26 @@ class GenericEmbeddingPipeline:
         self,
         items: list[EmbeddingItem],
         collection_name: str = None,
-        batch_size: int = 64,
-        max_workers: int = 4,
+        batch_size: int = None,
+        max_workers: int = None,
         resume: bool = True,
         max_retries: int = 3
     ) -> PipelineMetrics:
         start_time = time.perf_counter()
         target_collection = collection_name or settings.QDRANT_COLLECTION_NAME
+
+        # Automatic batching and worker count determination
+        device_type = str(getattr(self.embedder, "device", "cpu")).lower()
+        actual_batch_size = (
+            batch_size
+            if batch_size is not None
+            else (8 if device_type == "cuda" else 32)
+        )
+        actual_workers = (
+            max_workers
+            if max_workers is not None
+            else (1 if device_type == "cuda" else 4)
+        )
 
         # Ensure vector collection exists
         await self.vector_store.initialize_collection(
@@ -80,7 +99,7 @@ class GenericEmbeddingPipeline:
 
         logger.info(
             f"Starting EmbeddingPipeline processing: {len(pending_items)} items pending "
-            f"({skipped_count} skipped via checkpoint). Batch size: {batch_size}, Workers: {max_workers}."
+            f"({skipped_count} skipped via checkpoint). Batch size: {actual_batch_size}, Workers: {actual_workers}."
         )
 
         if not pending_items:
@@ -97,11 +116,11 @@ class GenericEmbeddingPipeline:
 
         # Segment pending items into batches for high GPU utilization
         batches = [
-            pending_items[i : i + batch_size]
-            for i in range(0, len(pending_items), batch_size)
+            pending_items[i : i + actual_batch_size]
+            for i in range(0, len(pending_items), actual_batch_size)
         ]
 
-        semaphore = asyncio.Semaphore(max_workers)
+        semaphore = asyncio.Semaphore(actual_workers)
         processed_count = 0
         failed_count = 0
 

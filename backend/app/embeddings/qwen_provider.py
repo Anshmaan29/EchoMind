@@ -16,7 +16,9 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
     - Automatic CUDA / MPS / CPU hardware detection
     - Standard single-GPU model loading (AutoModel.from_pretrained + self.model.cuda())
     - bfloat16 mixed precision inference optimized for NVIDIA A100 GPUs
-    - Batching & PyTorch autocast optimization
+    - torch.inference_mode() memory-efficient inference
+    - Post-batch CUDA tensor deletion, synchronization, and empty_cache memory cleanup
+    - Detailed GPU memory telemetry per batch (allocated, reserved, peak MB)
     - L2 Vector Normalization
     - Vector dimension validation (4096 dims default)
     - Hardware telemetry benchmarks (latency, throughput, peak VRAM)
@@ -120,8 +122,8 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
                 return_tensors="pt"
             ).to(self.device)
 
-            # 2. PyTorch Inference (bfloat16 autocast & no_grad optimization for A100)
-            with torch.no_grad():
+            # 2. PyTorch Inference using torch.inference_mode() for minimal memory overhead
+            with torch.inference_mode():
                 if self.device == "cuda":
                     with torch.amp.autocast("cuda", dtype=self.torch_dtype):
                         model_output = self.model(**encoded_input)
@@ -139,17 +141,7 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
                 normalized_embeddings = torch.nn.functional.normalize(sentence_embeddings, p=2, dim=1)
                 numpy_embeddings = normalized_embeddings.cpu().numpy()
 
-            # 3. Telemetry Metrics Calculation
-            batch_latency_ms = (time.perf_counter() - start_time) * 1000
-            self.total_batches_processed += 1
-            self.total_embeddings_generated += len(texts)
-            self.total_latency_ms += batch_latency_ms
-
-            if self.device == "cuda" and torch.cuda.is_available():
-                peak_mem_bytes = torch.cuda.max_memory_allocated(0)
-                self.peak_gpu_memory_mb = round(peak_mem_bytes / (1024 * 1024), 2)
-
-            # 4. Dimension Verification
+            # 3. Dimension Verification
             results: list[list[float]] = []
             for vec in numpy_embeddings:
                 vec_list = vec.tolist()
@@ -158,6 +150,38 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
                         f"Vector dimension mismatch for Qwen model: expected {self._dimension}, got {len(vec_list)}"
                     )
                 results.append(vec_list)
+
+            # 4. Telemetry Metrics Calculation
+            batch_latency_ms = (time.perf_counter() - start_time) * 1000
+            self.total_batches_processed += 1
+            self.total_embeddings_generated += len(texts)
+            self.total_latency_ms += batch_latency_ms
+
+            # 5. Explicitly delete batch intermediate tensors to release PyTorch allocator references
+            del encoded_input
+            del model_output
+            del token_embeddings
+            del attention_mask
+            del sum_embeddings
+            del sum_mask
+            del sentence_embeddings
+            del normalized_embeddings
+            del numpy_embeddings
+
+            # 6. Post-batch CUDA synchronization & cache clearing (after batch completes)
+            if self.device == "cuda" and torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+
+                alloc_mb = round(torch.cuda.memory_allocated(0) / (1024 * 1024), 2)
+                res_mb = round(torch.cuda.memory_reserved(0) / (1024 * 1024), 2)
+                peak_mb = round(torch.cuda.max_memory_allocated(0) / (1024 * 1024), 2)
+                self.peak_gpu_memory_mb = peak_mb
+
+                logger.info(
+                    f"Qwen Batch {self.total_batches_processed} ({len(texts)} items, {batch_latency_ms:.1f}ms) | "
+                    f"GPU Memory: allocated={alloc_mb}MB, reserved={res_mb}MB, peak={peak_mb}MB"
+                )
 
             return results
 

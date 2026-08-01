@@ -104,8 +104,8 @@ class BGEEmbeddingProvider(BaseEmbeddingProvider):
                 return_tensors="pt"
             ).to(self.device)
 
-            # 2. PyTorch Inference (no_grad & autocast for A100 GPU speedup)
-            with torch.no_grad():
+            # 2. PyTorch Inference (torch.inference_mode & autocast for A100 GPU speedup)
+            with torch.inference_mode():
                 if self.device == "cuda":
                     with torch.amp.autocast("cuda", dtype=self.torch_dtype):
                         model_output = self.model(**encoded_input)
@@ -123,17 +123,7 @@ class BGEEmbeddingProvider(BaseEmbeddingProvider):
                 normalized_embeddings = torch.nn.functional.normalize(sentence_embeddings, p=2, dim=1)
                 numpy_embeddings = normalized_embeddings.cpu().numpy()
 
-            # 3. Benchmark Telemetry
-            batch_latency_ms = (time.perf_counter() - start_time) * 1000
-            self.total_batches_processed += 1
-            self.total_embeddings_generated += len(texts)
-            self.total_latency_ms += batch_latency_ms
-
-            if self.device == "cuda" and torch.cuda.is_available():
-                peak_mem_bytes = torch.cuda.max_memory_allocated(0)
-                self.peak_gpu_memory_mb = round(peak_mem_bytes / (1024 * 1024), 2)
-
-            # 4. Dimension Verification
+            # 3. Dimension Verification
             results: list[list[float]] = []
             for vec in numpy_embeddings:
                 vec_list = vec.tolist()
@@ -142,6 +132,28 @@ class BGEEmbeddingProvider(BaseEmbeddingProvider):
                         f"Vector dimension mismatch: expected {self._dimension}, got {len(vec_list)}"
                     )
                 results.append(vec_list)
+
+            # 4. Benchmark Telemetry & Tensor Cleanup
+            batch_latency_ms = (time.perf_counter() - start_time) * 1000
+            self.total_batches_processed += 1
+            self.total_embeddings_generated += len(texts)
+            self.total_latency_ms += batch_latency_ms
+
+            del encoded_input
+            del model_output
+            del token_embeddings
+            del attention_mask
+            del sum_embeddings
+            del sum_mask
+            del sentence_embeddings
+            del normalized_embeddings
+            del numpy_embeddings
+
+            if self.device == "cuda" and torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                peak_mem_bytes = torch.cuda.max_memory_allocated(0)
+                self.peak_gpu_memory_mb = round(peak_mem_bytes / (1024 * 1024), 2)
 
             return results
 

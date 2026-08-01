@@ -108,14 +108,14 @@ def main() -> None:
     parser.add_argument(
         "--batch-size", "-b",
         type=int,
-        default=64,
-        help="Batch size for embedding generation (default: 64)",
+        default=None,
+        help="Batch size for embedding generation (default: auto -> CUDA: 8, CPU: 32)",
     )
     parser.add_argument(
         "--workers", "-w",
         type=int,
-        default=4,
-        help="Number of async worker tasks (default: 4)",
+        default=None,
+        help="Number of async worker tasks (default: auto -> CUDA: 1, CPU: 4)",
     )
     parser.add_argument(
         "--collection-name", "-c",
