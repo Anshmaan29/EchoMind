@@ -3,7 +3,7 @@ import asyncio
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.llm.factory import LLMFactory
-from app.services.ask_service import AskService
+from app.services.ask_service import TimelineAwareAskService
 
 async def main_async(args: argparse.Namespace) -> None:
     setup_logging()
@@ -11,7 +11,7 @@ async def main_async(args: argparse.Namespace) -> None:
     llm_name = args.llm_provider or settings.LLM_PROVIDER
     llm_inst = LLMFactory.get_provider(provider_name=llm_name)
 
-    ask_service = AskService(llm_provider_inst=llm_inst)
+    ask_service = TimelineAwareAskService(llm_provider_inst=llm_inst)
     response = await ask_service.ask(
         question=args.query,
         top_k=args.top_k,

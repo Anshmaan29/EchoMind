@@ -60,6 +60,7 @@ async def test_embed_cli_main_execution(tmp_path) -> None:
 
     args = argparse.Namespace(
         input=str(sample_code),
+        provider=None,
         batch_size=16,
         workers=2,
         collection_name="test_codebase_collection",
