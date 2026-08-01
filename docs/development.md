@@ -1,89 +1,71 @@
-# EchoMind macOS Local Development Guide
+# Development Principles & Contributing Guide
 
-Welcome to local development on **EchoMind**. This guide explains how to set up your environment, run local embeddings without downloading heavy neural network models, execute test suites, and perform vector searches.
-
----
-
-## 🏛️ Core Philosophy: Zero-Download & Zero-Qdrant Development
-
-Local development on macOS is designed to be **fast, lightweight, clean, and offline-first**:
-- **Mock Embedding Provider** (`EMBEDDING_PROVIDER=mock`): Zero LLM or transformer model weights are downloaded to your Mac. All embedding generation, CLI utilities, and tests use deterministic in-memory vector hashing.
-- **Optional Qdrant Vector Store**: You do **not** need Qdrant or Docker running locally. When Qdrant is offline, EchoMind automatically logs a single warning (`"Qdrant unavailable. Using local JSONL backup."`) and streams vectors directly into `data/embeddings_backup.jsonl` and SQLite checkpoints without error noise or stack traces.
+This document outlines core software engineering practices and instructions for contributing to EchoMind.
 
 ---
 
-## ⚙️ Environment Configuration
+## Core Engineering Principles
 
-Ensure your local `.env` and `backend/.env` files set the mock provider:
+### 1. Modular Architecture & Provider Abstraction
+All core subsystems (vector stores, embedding engines, LLM backends, graph stores) implement explicit abstract base interfaces:
+- `BaseEmbeddingProvider` (`app.embeddings.base`)
+- `BaseVectorStore` (`app.vector.base`)
+- `BaseLLMProvider` (`app.llm.providers.base`)
+- `BaseGraphStore` (`app.graph.base`)
 
-```ini
-EMBEDDING_PROVIDER=mock
-EMBEDDING_MODEL_NAME=mock_hash
-EMBEDDING_DIMENSION=384
-```
+Downstream search, timeline, and RAG services interact exclusively through these abstractions, enabling zero-code changes when swapping underlying providers.
 
----
+### 2. Dependency Injection & Lazy Initialization
+Services receive instantiated dependencies rather than creating global hardcoded instances. Embedding providers use lazy factory initialization (`EmbeddingFactory.get_provider()`) with process-level singleton caching, ensuring heavy machine learning models (like Qwen) are imported and initialized on-demand and loaded only once per process.
 
-## 🚀 Running Local Embedding Generation
+### 3. Grounded Retrieval
+All answer generation workflows prioritize verifiable context extracted from personal data sources (git commits, markdown notes, PDFs). Answers cite explicit file paths, line numbers, and commit hashes.
 
-Recursively scan and chunk source files across your local repository without Qdrant or GPU:
-
-```bash
-cd backend
-python -m app.cli.embed --input ..
-```
-
-### CLI Output (Clean Console)
-```text
-2026-08-01T04:45:00.000000Z [warning] Qdrant unavailable. Using local JSONL backup.
-
-=================================================================
-🚀 ECHOMIND EMBEDDING CLI SUMMARY
-=================================================================
-Embedding Provider   : MOCK
-Embedding Model      : mock_hash
-Device               : CPU
-Embedding Dimension  : 384
-Chunks Processed     : 302
-Embeddings/sec       : 4314.29
-=================================================================
-```
+### 4. Production-First Design & Fallback Resiliency
+Systems include graceful offline fallbacks:
+- If Qdrant vector database is unavailable, operations transparently fallback to local JSONL vector storage (`data/embeddings_backup.jsonl`).
+- If Neo4j graph store is unreachable, operations fallback to in-memory mock graph stores.
+- GPU inference uses `torch.inference_mode()` with post-batch CUDA memory synchronization and cleanup to prevent allocator fragmentation on memory-constrained GPU environments.
 
 ---
 
-## 🔍 Running Local JSONL Vector Search
+## Contributing Guide
 
-Search your local codebase vectors stored in `data/embeddings_backup.jsonl` with zero Qdrant dependency:
+Contributions are welcome. Please follow these guidelines:
 
-```bash
-python -m app.cli.search --query "Where is SearchService implemented?"
-```
-
----
-
-## 🧪 Running Pytest Test Suite
-
-Execute the fast local test suite:
-
-```bash
-PYTHONPATH=backend uv run pytest backend/tests -v
-```
-
----
-
-## 🌿 Git & Contribution Workflow
-
-1. Create a feature branch:
+1. **Fork and Clone**:
    ```bash
-   git checkout -b feature/my-feature
+   git clone https://github.com/Anshmaan29/EchoMind.git
+   cd EchoMind
    ```
-2. Verify all tests pass locally:
+
+2. **Branching Model**:
+   Create a focused feature branch:
    ```bash
-   PYTHONPATH=backend uv run pytest backend/tests -v
+   git checkout -b feature/your-feature-name
    ```
-3. Commit and push:
+
+3. **Code Style & Guidelines**:
+   - Write clean, type-annotated Python 3.11 code.
+   - Maintain docstrings and maintain docstrings across edits.
+   - Never introduce hardcoded model dimensions or global static paths.
+
+4. **Testing**:
+   Run the pytest test suite from `backend/`:
    ```bash
-   git add .
-   git commit -m "feat: add feature"
-   git push origin feature/my-feature
+   cd backend
+   pytest
    ```
+
+5. **Pull Request Submission**:
+   Submit a PR summarizing:
+   - What problem your change solves
+   - Implementation details and design rationale
+   - Manual or automated verification steps performed
+
+---
+
+## References
+
+- [Architecture Guide](architecture.md)
+- [Roadmap](roadmap.md)
