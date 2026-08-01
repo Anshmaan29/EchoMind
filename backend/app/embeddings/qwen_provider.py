@@ -6,20 +6,24 @@ from app.core.exceptions import EchoMindException
 from app.core.logging import logger
 from app.embeddings.base import BaseEmbeddingProvider
 
+
 class QwenEmbeddingProvider(BaseEmbeddingProvider):
     """
     Production Embedding Provider using Qwen/Qwen3-Embedding-8B via PyTorch & Transformers.
-    Intended for AI Kosh GPU environments.
-    
+    Intended for AI Kosh GPU environments (NVIDIA A100 / A100 MIG 3g.20gb).
+
     Features:
     - Automatic CUDA / MPS / CPU hardware detection
+    - Hugging Face `device_map="cuda"` direct allocation to avoid NVML allocation crashes on MIG slices
     - bfloat16 mixed precision inference optimized for NVIDIA A100 GPUs
-    - Batching & PyTorch autocast optimization
+    - Dynamic model device discovery for input tensor placement
+    - PyTorch autocast optimization
     - L2 Vector Normalization
     - Vector dimension validation (4096 dims default)
-    - Hardware telemetry benchmarks (latency, throughput, peak VRAM)
+    - Hardware telemetry benchmarks (latency, throughput, peak VRAM, allocated/reserved memory)
     - STRICT EXCEPTION HANDLING: Never silently falls back to mock provider.
     """
+
     def __init__(self, model_name: str = None, dimension: int = 4096) -> None:
         self.model_name = model_name or settings.EMBEDDING_MODEL_NAME
         self._dimension = dimension
@@ -27,6 +31,7 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
         self.torch_dtype = None
         self.model = None
         self.tokenizer = None
+        self.model_device = None
         self._is_initialized = False
 
         # Telemetry metrics
@@ -64,17 +69,57 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
                 self.torch_dtype = torch.float32
                 logger.info("QwenEmbeddingProvider running on CPU.")
 
+            # Log CUDA memory before model load
+            if self.device == "cuda" and torch.cuda.is_available():
+                alloc_before = torch.cuda.memory_allocated(0) / (1024 * 1024)
+                res_before = torch.cuda.memory_reserved(0) / (1024 * 1024)
+                logger.info(
+                    f"CUDA Memory Before Load: Allocated={alloc_before:.2f} MB, Reserved={res_before:.2f} MB"
+                )
+
             logger.info(f"Loading Qwen Transformer Model '{self.model_name}'...")
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-            self.model = AutoModel.from_pretrained(
-                self.model_name,
-                trust_remote_code=True,
-                torch_dtype=self.torch_dtype if self.device == "cuda" else None
-            )
-            self.model.to(self.device)
+
+            model_kwargs: dict[str, Any] = {
+                "trust_remote_code": True,
+            }
+
+            if self.device == "cuda":
+                # Use Hugging Face direct CUDA placement to prevent CPU->GPU double-allocation NVML crashes on MIG slices
+                model_kwargs["device_map"] = "cuda"
+                model_kwargs["torch_dtype"] = self.torch_dtype
+            elif self.torch_dtype is not None:
+                model_kwargs["torch_dtype"] = self.torch_dtype
+
+            self.model = AutoModel.from_pretrained(self.model_name, **model_kwargs)
+
+            if self.device != "cuda":
+                self.model.to(self.device)
+
             self.model.eval()
+
+            # Model device discovery for tokenized input tensor placement
+            if hasattr(self.model, "device"):
+                self.model_device = self.model.device
+            else:
+                try:
+                    self.model_device = next(self.model.parameters()).device
+                except Exception:
+                    self.model_device = torch.device(self.device)
+
             self._is_initialized = True
-            logger.info(f"QwenEmbeddingProvider successfully initialized '{self.model_name}'.")
+
+            # Log CUDA memory after model load
+            if self.device == "cuda" and torch.cuda.is_available():
+                alloc_after = torch.cuda.memory_allocated(0) / (1024 * 1024)
+                res_after = torch.cuda.memory_reserved(0) / (1024 * 1024)
+                logger.info(
+                    f"CUDA Memory After Load: Allocated={alloc_after:.2f} MB, Reserved={res_after:.2f} MB"
+                )
+
+            logger.info(
+                f"QwenEmbeddingProvider successfully initialized '{self.model_name}' on device '{self.model_device}'."
+            )
 
         except Exception as e:
             logger.error(f"CRITICAL: Failed to load Qwen embedding model '{self.model_name}': {e}")
@@ -101,18 +146,23 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
         try:
             import torch
 
-            # 1. Tokenize input batch
+            target_device = self.model_device or getattr(
+                self.model, "device", next(self.model.parameters()).device
+            )
+
+            # 1. Tokenize input batch and place on model's actual device
             encoded_input = self.tokenizer(
                 texts,
                 padding=True,
                 truncation=True,
                 max_length=512,
                 return_tensors="pt"
-            ).to(self.device)
+            ).to(target_device)
 
             # 2. PyTorch Inference (bfloat16 autocast & no_grad optimization for A100)
+            is_cuda = str(target_device).startswith("cuda") or self.device == "cuda"
             with torch.no_grad():
-                if self.device == "cuda":
+                if is_cuda:
                     with torch.amp.autocast("cuda", dtype=self.torch_dtype):
                         model_output = self.model(**encoded_input)
                 else:
@@ -167,7 +217,7 @@ class QwenEmbeddingProvider(BaseEmbeddingProvider):
         )
 
         return {
-            "device": self.device,
+            "device": str(self.model_device or self.device),
             "gpu_device_name": self.gpu_device_name,
             "model_name": self.model_name,
             "dimension": self._dimension,
