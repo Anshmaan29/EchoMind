@@ -8,26 +8,26 @@ EchoMind is designed as a modular personal AI memory system. It ingests digital 
 
 ```mermaid
 flowchart TD
-    subgraph Data Sources
+    subgraph DS["Data Sources"]
         GitRepo["Git Repositories"]
         Notes["Markdown Notes"]
         PDFs["PDF Documents"]
     end
 
-    subgraph Ingestion & Pipeline
+    subgraph IP["Ingestion & Pipeline"]
         Connectors["Source Connectors"]
         Chunker["Text Chunker"]
         EmbeddingEngine["Embedding Factory<br/>(Mock / Qwen / BGE / OpenAI)"]
     end
 
-    subgraph Memory & Storage Layer
+    subgraph MSL["Memory & Storage Layer"]
         Qdrant["Qdrant Vector DB<br/>(JSONL Fallback)"]
         Neo4j["Neo4j Graph DB"]
         Postgres["PostgreSQL DB"]
         TimelineService["Timeline Engine"]
     end
 
-    subgraph Query & RAG Engine
+    subgraph QRE["Query & RAG Engine"]
         UserQuery["User Query / CLI"]
         Retriever["Hybrid Search Service"]
         AskService["Timeline-Aware Ask Service"]
@@ -35,7 +35,9 @@ flowchart TD
         LLMGateway["OpenAI-Compatible LLM Gateway"]
     end
 
-    Data Sources --> Connectors
+    GitRepo --> Connectors
+    Notes --> Connectors
+    PDFs --> Connectors
     Connectors --> Chunker
     Chunker --> EmbeddingEngine
     EmbeddingEngine --> Qdrant

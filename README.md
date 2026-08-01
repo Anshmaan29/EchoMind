@@ -74,30 +74,39 @@ For full installation details, see the **[Installation Guide](docs/installation.
 
 ```mermaid
 flowchart TD
-    subgraph Data Sources
+    subgraph DS["Data Sources"]
         GitRepo["Git Repositories"]
         Notes["Markdown Notes"]
         PDFs["PDF Documents"]
     end
 
-    subgraph Memory & Storage Layer
+    subgraph MSL["Memory & Storage Layer"]
         Qdrant["Qdrant Vector DB<br/>(JSONL Fallback)"]
         Neo4j["Neo4j Graph DB"]
         Postgres["PostgreSQL DB"]
         TimelineService["Timeline Engine"]
     end
 
-    subgraph Query & RAG Engine
+    subgraph QRE["Query & RAG Engine"]
         UserQuery["User Query / CLI"]
         Retriever["Hybrid Search Service"]
         AskService["Timeline-Aware Ask Service"]
         LLMGateway["OpenAI-Compatible LLM Gateway"]
     end
 
-    Data Sources --> Qdrant
-    Data Sources --> Neo4j
-    Data Sources --> Postgres
-    Data Sources --> TimelineService
+    GitRepo --> Qdrant
+    Notes --> Qdrant
+    PDFs --> Qdrant
+
+    GitRepo --> Neo4j
+    Notes --> Neo4j
+
+    GitRepo --> Postgres
+    Notes --> Postgres
+    PDFs --> Postgres
+
+    GitRepo --> TimelineService
+    Notes --> TimelineService
 
     UserQuery --> AskService
     AskService --> Retriever
