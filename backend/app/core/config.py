@@ -42,10 +42,10 @@ class Settings(BaseSettings):
     NEO4J_DATABASE: str = "neo4j"
     GRAPH_STORE_TYPE: Literal["neo4j", "mock"] = "neo4j"
 
-    # Embedding Provider Configuration
+    # Embedding Provider Configuration (Local Mock default: 384; Production providers use native model dimensions)
     EMBEDDING_PROVIDER: Literal["mock", "openai", "sentence_transformers", "bge-m3", "qwen", "qwen3", "nomic"] = "mock"
     EMBEDDING_MODEL_NAME: str = "Qwen/Qwen3-Embedding-8B"
-    EMBEDDING_DIMENSION: int = 384
+    EMBEDDING_DIMENSION: int = 384  # Default dimension for local MockEmbeddingProvider development
     OPENAI_API_KEY: str | None = None
 
     # LLM Provider Configuration (RAG Pipeline)

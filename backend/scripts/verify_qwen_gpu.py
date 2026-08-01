@@ -35,13 +35,9 @@ async def main() -> None:
     print("=" * 65)
 
     model_name = settings.EMBEDDING_MODEL_NAME
-    target_dim = settings.EMBEDDING_DIMENSION
-
-    print(f"Target Model Name   : {model_name}")
-    print(f"Configured Dimension : {target_dim}")
 
     try:
-        provider = QwenEmbeddingProvider(model_name=model_name, dimension=target_dim)
+        provider = QwenEmbeddingProvider(model_name=model_name)
     except Exception as e:
         print(f"\n❌ FAILED to load QwenEmbeddingProvider: {e}")
         print("Check CUDA drivers, PyTorch installation, or Hugging Face access.\n")
