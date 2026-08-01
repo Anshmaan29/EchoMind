@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import logger
-from app.embeddings.factory import embedding_provider
+from app.embeddings.factory import get_embedding_provider
 from app.extraction.entity_extractor import EntityExtractor
 from app.extraction.relation_extractor import RelationshipExtractor
 from app.graph.factory import graph_store
@@ -36,7 +36,7 @@ class IngestionService:
             loader=PDFLoader(),
             parser=PDFParser(),
             chunker=TextChunker(chunk_size=500, chunk_overlap=100),
-            embedder=embedding_provider
+            embedder=get_embedding_provider()
         )
         self.entity_extractor = EntityExtractor()
         self.relationship_extractor = RelationshipExtractor()
@@ -76,7 +76,7 @@ class IngestionService:
         # 5. Initialize Stores
         await vector_store.initialize_collection(
             collection_name=settings.QDRANT_COLLECTION_NAME,
-            dimension=embedding_provider.dimension
+            dimension=self.pipeline.embedder.dimension
         )
         await self.graph_store.initialize()
 

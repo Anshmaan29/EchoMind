@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.config import settings
 from app.core.logging import logger
 from app.embeddings.base import BaseEmbeddingProvider
-from app.embeddings.factory import embedding_provider
+from app.embeddings.factory import get_embedding_provider
 from app.vector.base import BaseVectorStore
 from app.vector.factory import vector_store
 
@@ -152,7 +152,7 @@ class SearchService:
         vector_store_inst: BaseVectorStore = None,
         backup_filepath: str = None
     ) -> None:
-        self.embedder = embedder or embedding_provider
+        self.embedder = embedder if embedder is not None else get_embedding_provider()
         self.vector_store = vector_store_inst or vector_store
         self.backup_filepath = backup_filepath or self._discover_backup_filepath()
 
