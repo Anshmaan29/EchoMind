@@ -6,18 +6,13 @@ EchoMind is an AI-powered Digital Memory Operating System. Instead of simply cha
 
 - **Milestone 1**: Clean Architecture Backend (FastAPI + PostgreSQL 16 + Qdrant + Docker Compose)
 - **Milestone 2**: Temporal Knowledge Engine (Entity & Relationship Extractors + Timeline Engine + Neo4j GraphStore)
-- **Milestone 3.1 & 3.2**: Production-Grade Embedding Pipeline (BAAI/bge-m3 + PyTorch CUDA acceleration + Checkpoint Ledger + Local JSONL Backups)
-- **AI Kosh GPU Experiments Framework (`experiments/`)**: Standalone GPU execution runners for embedding generation, entity extraction, relationship discovery, vector re-ranking, and RAG evaluation.
+- **Milestone 3**: Production Embedding Generation (BAAI/bge-m3 + Qwen/Qwen3-Embedding-8B + Local JSONL Backups)
+- **AI Kosh GPU Experiments Harness (`experiments/`)**: Standalone GPU execution runners for embedding generation, entity extraction, relationship discovery, vector re-ranking, and RAG evaluation.
+- **EchoMind Ask CLI (RAG Pipeline)**: Conversational RAG interface connecting `SearchService`, `PromptBuilder`, and `LLMProvider`.
 
-### Running Standalone GPU Experiments
+### Ask CLI Usage
 ```bash
-PYTHONPATH=backend:. uv run python experiments/embedding_generation/run_embedding_experiment.py
+python -m app.cli.ask --query "Where is QwenEmbeddingProvider implemented?"
 ```
 
-### Running Backend API & Services
-```bash
-docker-compose up -d --build
-curl http://localhost:8000/health
-```
-
-For full architecture diagrams and experiment guides, see the [Backend Documentation](file:///Users/anshmaansingh/Echomind/backend/README.md).
+For full architecture diagrams, see the [Backend Documentation](file:///Users/anshmaansingh/Echomind/backend/README.md) and [RAG Guide](file:///Users/anshmaansingh/Echomind/docs/rag.md).

@@ -11,7 +11,7 @@ from app.embeddings.factory import embedding_provider
 from app.vector.base import BaseVectorStore, VectorRecord
 from app.vector.factory import vector_store
 
-SourceType = Literal["pdf", "image", "github", "timeline", "entity"]
+SourceType = Literal["pdf", "image", "github", "timeline", "entity", "notes"]
 
 class EmbeddingItem(BaseModel):
     """

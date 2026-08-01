@@ -1,11 +1,16 @@
-# LLM package initialization
-from app.llm.base import BaseLLMProvider
 from app.llm.factory import LLMFactory, get_llm_provider, llm_provider
-from app.llm.mock_provider import MockLLMProvider
+from app.llm.providers import (
+    BaseLLMProvider,
+    HuggingFaceLLMProvider,
+    MockLLMProvider,
+    OpenAICompatibleProvider,
+)
 
 __all__ = [
     "BaseLLMProvider",
     "MockLLMProvider",
+    "HuggingFaceLLMProvider",
+    "OpenAICompatibleProvider",
     "LLMFactory",
     "get_llm_provider",
     "llm_provider",

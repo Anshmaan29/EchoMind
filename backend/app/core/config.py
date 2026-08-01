@@ -49,9 +49,18 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
 
     # LLM Provider Configuration (RAG Pipeline)
-    LLM_PROVIDER: Literal["mock", "openai", "anthropic", "openrouter"] = "mock"
-    LLM_MODEL_NAME: str = "mock-gpt-4o"
+    LLM_PROVIDER: str = "mock"
+    LLM_MODEL: str = "mock-gpt-4o"
+    LLM_BASE_URL: str = "http://localhost:8000/v1"
     LLM_API_KEY: str | None = None
+    LLM_STREAM: bool = False
+    LLM_TEMPERATURE: float = 0.7
+    LLM_MAX_TOKENS: int = 512
+
+    @property
+    def LLM_MODEL_NAME(self) -> str:
+        """Backwards-compatibility alias for LLM_MODEL."""
+        return self.LLM_MODEL
 
     @property
     def async_database_url(self) -> str:

@@ -45,6 +45,7 @@ _PERIOD_DAYS: dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 _GIT_SOURCE_LABELS   = {"timeline", "git"}
+_NOTES_SOURCE_LABELS = {"notes", "note"}
 _CODE_EXTENSIONS     = {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".cpp", ".c", ".h"}
 _MARKDOWN_EXTENSIONS = {".md", ".mdx"}
 _DOC_EXTENSIONS      = {".txt", ".rst", ".pdf", ".html", ".htm"}
@@ -55,12 +56,15 @@ def _classify_source(result: SearchResult) -> str:
     Maps a SearchResult to a human-readable source label.
 
     Priority:
-      1. result.source field  (e.g. 'timeline' from GitConnector)
+      1. result.source field  (e.g. 'timeline' from GitConnector, 'notes' from NoteConnector)
       2. file extension of filepath
       3. fallback to 'code'
     """
-    if result.source.lower() in _GIT_SOURCE_LABELS:
+    s_lower = result.source.lower()
+    if s_lower in _GIT_SOURCE_LABELS:
         return "git"
+    if s_lower in _NOTES_SOURCE_LABELS:
+        return "notes"
 
     ext = os.path.splitext(result.filepath)[1].lower()
     if ext in _MARKDOWN_EXTENSIONS:
@@ -75,11 +79,20 @@ def _extract_timestamp(result: SearchResult) -> datetime:
     Extracts the best available timestamp from a SearchResult.
 
     For git chunks: parses the 'date' field in metadata.
+    For notes: parses 'date', 'modified_date', or 'created_date'.
     For code/doc chunks: falls back to the current UTC time.
     """
     meta = result.meta_data or {}
-    date_str = meta.get("date") or meta.get("date_human", "")
+    date_str = meta.get("date") or meta.get("modified_date") or meta.get("created_date") or meta.get("date_human", "")
     if date_str:
+        try:
+            dt = datetime.fromisoformat(date_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            pass
+
         for fmt in (
             "%Y-%m-%dT%H:%M:%S%z",
             "%Y-%m-%dT%H:%M:%S.%f%z",
@@ -105,6 +118,9 @@ def _build_title(result: SearchResult, source_label: str) -> str:
         if msg:
             return msg[:90] + ("..." if len(msg) > 90 else "")
         return f"Commit {meta.get('short_hash', result.filename)}"
+    if source_label == "notes":
+        title = meta.get("title") or result.filename or os.path.basename(result.filepath)
+        return f"Note: {title}"
     name = result.filename or os.path.basename(result.filepath)
     return f"{name} (L{result.start_line}-L{result.end_line})"
 
@@ -127,6 +143,11 @@ def _build_summary(result: SearchResult, source_label: str) -> str:
         if added or deleted:
             parts.append(f"+{added}/-{deleted} lines")
         return "  ".join(parts) if parts else result.content[:200]
+    if source_label == "notes":
+        tags = meta.get("tags", [])
+        tags_str = f"Tags: {', '.join(tags)} | " if tags else ""
+        text = result.content.strip()
+        return f"{tags_str}{text[:150]}" + ("..." if len(text) > 150 else "")
     text = result.content.strip()
     return text[:200] + ("..." if len(text) > 200 else "")
 
@@ -160,7 +181,7 @@ class TimelineEvent(BaseModel):
     Fields
     ------
     timestamp : UTC datetime of the event
-    source    : 'git' | 'code' | 'markdown' | 'doc'
+    source    : 'git' | 'code' | 'markdown' | 'doc' | 'notes'
     title     : Human-readable one-liner
     summary   : 1-2 sentence description
     filepath  : Originating file path
@@ -169,7 +190,7 @@ class TimelineEvent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     timestamp: datetime             = Field(description="UTC datetime of the event")
-    source:    str                  = Field(description="git | code | markdown | doc")
+    source:    str                  = Field(description="git | code | markdown | doc | notes")
     title:     str                  = Field(description="Human-readable one-liner")
     summary:   str                  = Field(description="1-2 sentence description")
     filepath:  str                  = Field(description="Originating file path")
@@ -192,6 +213,7 @@ class TimelineEvent(BaseModel):
             "code":     "🐍",
             "markdown": "📄",
             "doc":      "📚",
+            "notes":    "📝",
         }.get(self.source, "🗂️")
 
     @classmethod
@@ -224,6 +246,7 @@ class DailySummary:
     new_classes:           list[str]           = field(default_factory=list)
     deleted_files:         list[str]           = field(default_factory=list)
     documentation_updates: list[str]           = field(default_factory=list)
+    notes_updates:         list[str]           = field(default_factory=list)
 
     def to_text(self) -> str:
         """Formats the summary as a plain-text block for LLM injection and CLI display."""
@@ -265,6 +288,11 @@ class DailySummary:
             for doc in self.documentation_updates[:10]:
                 lines.append(f"    * {doc}")
 
+        if self.notes_updates:
+            lines.append("\n  Personal notes updates:")
+            for note in self.notes_updates[:10]:
+                lines.append(f"    * {note}")
+
         lines.append("-" * 52)
         return "\n".join(lines)
 
@@ -278,15 +306,18 @@ _TEMPORAL_QUERIES: dict[str, list[str]] = {
         "commits today work done today",
         "code changes today files modified today",
         "documentation updated today",
+        "personal notes created modified notes",
     ],
     PERIOD_WEEK: [
         "commits this week work done this week",
         "code changes this week files modified this week",
         "documentation updated this week",
+        "personal notes created modified notes this week",
     ],
     PERIOD_MONTH: [
         "commits this month work done this month",
         "code changes this month major features this month",
+        "personal notes created modified notes this month",
     ],
 }
 
@@ -557,9 +588,10 @@ class TimelineService:
             since, until = self._period_window(PERIOD_TODAY)
             events = await self.get_events(since=since, until=until, period=PERIOD_TODAY)
 
-        git_events  = [ev for ev in events if ev.source == "git"]
-        code_events = [ev for ev in events if ev.source == "code"]
-        doc_events  = [ev for ev in events if ev.source in ("markdown", "doc")]
+        git_events   = [ev for ev in events if ev.source == "git"]
+        code_events  = [ev for ev in events if ev.source == "code"]
+        doc_events   = [ev for ev in events if ev.source in ("markdown", "doc")]
+        notes_events = [ev for ev in events if ev.source == "notes"]
 
         # Changed files from git commits
         files_changed: list[str] = []
@@ -585,7 +617,8 @@ class TimelineService:
                     if sym and sym not in new_classes:
                         new_classes.append(sym)
 
-        doc_updates = list({ev.filepath for ev in doc_events})
+        doc_updates   = list({ev.filepath for ev in doc_events})
+        notes_updates = list({ev.metadata.get("title") or ev.filepath for ev in notes_events})
 
         return DailySummary(
             date=target_date,
@@ -595,6 +628,7 @@ class TimelineService:
             new_classes=new_classes[:30],
             deleted_files=[],
             documentation_updates=doc_updates[:20],
+            notes_updates=notes_updates[:20],
         )
 
     def format_events_as_timeline(
@@ -620,7 +654,7 @@ class TimelineService:
             lines.append("")
             lines.append("  No activity found for this period.")
             lines.append(
-                "  Tip: run 'python -m app.cli.git_index' to index git history first."
+                "  Tip: run 'python -m app.cli.git_index' or 'python -m app.cli.notes_index' to index history/notes first."
             )
             lines.append("=" * 58)
             return "\n".join(lines)
@@ -635,12 +669,13 @@ class TimelineService:
 
         lines.append("")
         lines.append("-" * 58)
-        git_n  = sum(1 for e in events if e.source == "git")
-        code_n = sum(1 for e in events if e.source == "code")
-        md_n   = sum(1 for e in events if e.source in ("markdown", "doc"))
+        git_n   = sum(1 for e in events if e.source == "git")
+        code_n  = sum(1 for e in events if e.source == "code")
+        md_n    = sum(1 for e in events if e.source in ("markdown", "doc"))
+        notes_n = sum(1 for e in events if e.source == "notes")
         lines.append(
             f"  Total: {len(events)} events  "
-            f"[git={git_n}  code={code_n}  docs={md_n}]"
+            f"[git={git_n}  code={code_n}  docs={md_n}  notes={notes_n}]"
         )
         lines.append("=" * 58)
         return "\n".join(lines)

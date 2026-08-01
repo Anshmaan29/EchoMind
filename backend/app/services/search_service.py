@@ -96,13 +96,19 @@ def _compute_hybrid_boost(
             boost += 0.20
             break
 
-    # 2. Class / function name match  (weight 0.20)
+    # 2. Class / function / defined symbols / note metadata match  (weight 0.20)
     class_names = [c.lower() for c in meta.get("class_names", [])]
     function_names = [f.lower() for f in meta.get("function_names", [])]
     file_class_names = [c.lower() for c in meta.get("file_class_names", [])]
     defined_syms = [s.lower() for s in meta.get("defined_symbols", [])]
+    note_title = str(meta.get("title", "")).lower()
+    note_tags = [t.lower() for t in meta.get("tags", [])]
+    note_headings = [h.lower() for h in meta.get("headings", [])]
 
-    all_syms = set(class_names + function_names + file_class_names + defined_syms)
+    all_syms = set(
+        class_names + function_names + file_class_names + defined_syms +
+        ([note_title] if note_title else []) + note_tags + note_headings
+    )
     query_lower = query_raw.lower()
 
     for sym in all_syms:
@@ -110,7 +116,7 @@ def _compute_hybrid_boost(
             boost += 0.20
             break
     for tok in query_tokens:
-        if len(tok) >= 4 and any(tok in sym for sym in all_syms):
+        if len(tok) >= 3 and any(tok in sym for sym in all_syms):
             boost += 0.10
             break
 
